@@ -1312,12 +1312,16 @@ function renderPlayersStatus(){
   el.innerHTML = `<div class="muted" style="margin-bottom:8px;">${doneCount} من ${total} أرسلوا إجاباتهم</div>${chips}`;
 }
 async function pressStop(){
+  console.log('[STOP] button clicked. stopHandled=', stopHandled, 'currentRound=', currentRound, 'roomStatus=', currentRoomRow?.status);
   if(currentRoomMode === 'ai'){
     stopRoundTimer();
     finishAIRound();
     return;
   }
-  if(stopHandled) return;
+  if(stopHandled){
+    console.warn('[STOP] click ignored — stopHandled is already true for this round.');
+    return;
+  }
 
   // STOP must not depend on saving answers. Freeze the UI immediately, then
   // make rooms.stop_requested the one critical write. Saving this player's own
@@ -1482,26 +1486,66 @@ function hostNextRound(){
   else{ hostNextRoundOnline(); }
 }
 async function hostNextRoundOnline(){
-  if(!isHost) return;
+  const roomId = currentRoomId || parseInt(localStorage.getItem('wg_room_id'));
+  const playerId = currentPlayerId || parseInt(localStorage.getItem('wg_player_id'));
+  if(!roomId || !playerId){
+    alert('تعذر تحديد الغرفة أو اللاعب، جرّبي تحديث الصفحة.');
+    return;
+  }
   try{
+    // Re-check host status straight from the DB — never trust only the
+    // in-memory isHost flag, which can go stale and silently block this
+    // with zero feedback if it does.
+    const { data: me, error: meErr } = await supabaseClient
+      .from('players')
+      .select('id, is_host')
+      .eq('id', playerId)
+      .maybeSingle();
+    if(meErr) throw meErr;
+    if(!me || !me.is_host){
+      alert('فقط المضيف يستطيع بدء الجولة التالية.');
+      return;
+    }
     const nextRound = currentRound + 1;
     const letter = pickLetter();
     const encoded = encodeLetterRound(letter, nextRound);
-    const { error } = await supabaseClient.from('rooms').update({ status:'playing', current_letter: encoded, stop_requested:false }).eq('id', currentRoomId);
+    const { data, error } = await supabaseClient
+      .from('rooms')
+      .update({ status:'playing', current_letter: encoded, stop_requested:false })
+      .eq('id', roomId)
+      .select();
     if(error) throw error;
+    console.log('[NEXT ROUND] update response, rows affected:', data);
+    if(!data || data.length === 0){
+      console.error('[NEXT ROUND] WARNING: update matched 0 rows — roomId may be wrong/stale:', roomId);
+      alert('تم التحديث لكن لم يصل تأكيد من القاعدة — تحقق من صلاحيات RLS على جدول rooms.');
+    }
   }catch(e){
-    console.error(e);
-    alert('تعذر بدء الجولة التالية.');
+    console.error('NEXT ROUND ERROR:', e);
+    alert('تعذر بدء الجولة التالية: ' + (e?.message || e?.hint || e?.code || 'خطأ غير معروف'));
   }
 }
 async function hostEndGame(){
-  if(!isHost) return;
+  const roomId = currentRoomId || parseInt(localStorage.getItem('wg_room_id'));
+  const playerId = currentPlayerId || parseInt(localStorage.getItem('wg_player_id'));
+  if(!roomId || !playerId) return;
   try{
+    const { data: me, error: meErr } = await supabaseClient
+      .from('players')
+      .select('id, is_host')
+      .eq('id', playerId)
+      .maybeSingle();
+    if(meErr) throw meErr;
+    if(!me || !me.is_host){
+      alert('فقط المضيف يستطيع إنهاء اللعبة.');
+      return;
+    }
     await refreshPlayers();
-    const { error } = await supabaseClient.from('rooms').update({ status:'finished' }).eq('id', currentRoomId);
+    const { error } = await supabaseClient.from('rooms').update({ status:'finished' }).eq('id', roomId);
     if(error) throw error;
   }catch(e){
-    console.error(e);
+    console.error('END GAME ERROR:', e);
+    alert('تعذر إنهاء اللعبة: ' + (e?.message || e?.hint || e?.code || 'خطأ غير معروف'));
   }
 }
 
