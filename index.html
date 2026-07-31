@@ -1044,7 +1044,11 @@ function handleStopEvent(){
   const msgEl = document.getElementById('play-stop-msg');
   if(msgEl) msgEl.classList.remove('hidden');
   if(isHost){
-    hostFinalizeRound();
+    // Small grace buffer: the player who pressed STOP saves their own answers
+    // in parallel with broadcasting the stop, not before it. On a slower
+    // connection that save can still be in flight when this fires, so give it
+    // a brief window to land before scoring reads the answers table.
+    setTimeout(()=>{ hostFinalizeRound(); }, 900);
   }
 }
 function onAnswerInsert(row){
@@ -1299,27 +1303,35 @@ async function pressStop(){
   if(stopHandled) return;
 
   // STOP must not depend on saving answers. Freeze the UI immediately, then make
-  // rooms.stop_requested the single critical update. Saving this player's own
-  // answers happens after, best-effort, and can never block or undo the stop.
+  // rooms.stop_requested and this player's own answer save fire at the same time
+  // (not one after the other) — sending them sequentially left a real window
+  // where another client could see stop_requested=true and finalize scoring
+  // before this player's own just-typed answers had actually reached the DB.
   stopRoundTimer();
   const btn = document.getElementById('btn-stop');
   btn.disabled = true;
   btn.innerHTML = `${ICONS.check} STOP 🛑`;
   document.querySelectorAll('#play-table input').forEach(i=>i.disabled=true);
 
-  try{
-    console.log('[STOP] sending stop_requested=true for room', currentRoomId);
-    const { data, error } = await supabaseClient
-      .from('rooms')
-      .update({ stop_requested: true })
-      .eq('id', currentRoomId)
-      .select();
-    if(error) throw error;
-    console.log('[STOP] update response, rows affected:', data);
-    if(!data || data.length === 0){
-      console.error('[STOP] WARNING: update matched 0 rows — currentRoomId may be wrong/stale:', currentRoomId);
-    }
-  }catch(e){
+  const stopUpdatePromise = supabaseClient
+    .from('rooms')
+    .update({ stop_requested: true })
+    .eq('id', currentRoomId)
+    .select();
+
+  let answerSavePromise = Promise.resolve();
+  if(!submittedPlayerIds.has(currentPlayerId)){
+    const row = { player_id: currentPlayerId, round_number: currentRound, letter: currentLetter };
+    ALL_CATEGORIES.forEach(c=>{
+      row[CATEGORY_DB_FIELD[c.id]] = (document.getElementById('input-'+c.id)?.value || '').trim();
+    });
+    answerSavePromise = supabaseClient.from('answers').insert(row);
+  }
+
+  const [stopResult, answerResult] = await Promise.allSettled([stopUpdatePromise, answerSavePromise]);
+
+  if(stopResult.status === 'rejected' || stopResult.value?.error){
+    const e = stopResult.status === 'rejected' ? stopResult.reason : stopResult.value.error;
     console.error('stop_requested update failed:', e);
     // Only a failure to stop the round itself is shown to the player —
     // include the real error so the cause (missing column, RLS, etc.) is visible.
@@ -1330,24 +1342,18 @@ async function pressStop(){
     alert('تعذر إيقاف الجولة: ' + (e?.message || e?.details || e?.hint || JSON.stringify(e)));
     return;
   }
+  console.log('[STOP] update response, rows affected:', stopResult.value.data);
+  if(!stopResult.value.data || stopResult.value.data.length === 0){
+    console.error('[STOP] WARNING: update matched 0 rows — currentRoomId may be wrong/stale:', currentRoomId);
+  }
 
-  // Best-effort save of this player's own answers as they were at the moment of
-  // STOP. Skip if already saved; if saving fails, the round has already stopped
-  // for everyone and this player's unsent fields simply count as 0 later.
-  if(!submittedPlayerIds.has(currentPlayerId)){
-    const row = { player_id: currentPlayerId, round_number: currentRound, letter: currentLetter };
-    ALL_CATEGORIES.forEach(c=>{
-      row[CATEGORY_DB_FIELD[c.id]] = (document.getElementById('input-'+c.id)?.value || '').trim();
-    });
-    try{
-      const { error: answersErr } = await supabaseClient.from('answers').insert(row);
-      if(answersErr) throw answersErr;
-      submittedPlayerIds.add(currentPlayerId);
-      renderPlayersStatus();
-    }catch(e){
-      console.error(e);
-      // Intentionally silent: a failed answer save never blocks or reverses STOP.
-    }
+  // Best-effort: a failed or slow answer save never blocks or reverses STOP —
+  // this player's unsent fields just count as 0 if they truly never land.
+  if(answerResult.status === 'rejected' || answerResult.value?.error){
+    console.error('answer save failed:', answerResult.status === 'rejected' ? answerResult.reason : answerResult.value.error);
+  } else if(!submittedPlayerIds.has(currentPlayerId)){
+    submittedPlayerIds.add(currentPlayerId);
+    renderPlayersStatus();
   }
 }
 async function refreshSubmittedForCurrentRound(){
