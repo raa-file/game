@@ -464,12 +464,16 @@
         <button class="btn-seal" id="btn-start-round" onclick="hostStartRound()">ابدأ اللعبة</button>
       </div>
       <div id="lobby-waiting-msg" class="muted center-txt hidden" style="margin-top:10px;">بانتظار المضيف لبدء اللعبة...</div>
+      <button class="btn-secondary" style="margin-top:12px;" onclick="leaveRoom()">مغادرة الغرفة</button>
       <div id="lobby-error" class="muted" style="color:var(--seal); margin-top:8px;"></div>
     </div>
   </div>
 
   <!-- SCREEN: PLAYING -->
   <div class="screen" id="screen-play">
+    <div class="top-nav">
+      <span class="back-link" onclick="leaveRoom()">‹ مغادرة الغرفة</span>
+    </div>
     <div class="card center-txt">
       <div class="letter-seal" id="play-letter">أ</div>
       <div class="muted" id="play-round-label">الجولة 1 من 5</div>
@@ -490,6 +494,9 @@
 
   <!-- SCREEN: REVIEW -->
   <div class="screen" id="screen-review">
+    <div class="top-nav">
+      <span class="back-link" onclick="leaveRoom()">‹ مغادرة الغرفة</span>
+    </div>
     <div class="card center-txt">
       <h2 style="margin:0; font-size:1.3rem;">نتائج الجولة</h2>
       <div class="muted">الحرف: <b id="review-letter" style="color:var(--seal);"></b></div>
@@ -1419,6 +1426,7 @@ async function renderFinalFromPlayers(){
 
 /* ===================== LEAVE / CLEANUP ===================== */
 async function leaveRoom(){
+  stopRoundTimer();
   unsubscribeChannel();
   if(currentPlayerId){
     try{
