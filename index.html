@@ -1051,21 +1051,90 @@ async function toggleReady(){
   }catch(e){ console.error(e); }
 }
 async function hostStartRound(){
-  if(!isHost) return;
   const errEl = document.getElementById('lobby-error');
   errEl.textContent = '';
-  if(currentPlayers.length < 2){
-    errEl.textContent = 'تحتاجون لاعبين اثنين على الأقل لبدء اللعبة.';
+
+  // 1. Resolve room_id / player_id — prefer in-memory state, fall back to
+  //    localStorage in case either got cleared without a full page reload.
+  const roomId = currentRoomId || parseInt(localStorage.getItem('wg_room_id'));
+  const playerId = currentPlayerId || parseInt(localStorage.getItem('wg_player_id'));
+  if(!roomId || !playerId){
+    errEl.textContent = 'تعذر تحديد الغرفة أو اللاعب، جرّبي تحديث الصفحة.';
     return;
   }
+
   try{
+    // 2. Re-check host status straight from the DB (don't trust only the
+    //    in-memory isHost flag, which could be stale).
+    const { data: me, error: meErr } = await supabaseClient
+      .from('players')
+      .select('id, is_host')
+      .eq('id', playerId)
+      .maybeSingle();
+    if(meErr) throw meErr;
+    if(!me || !me.is_host){
+      errEl.textContent = 'فقط المضيف يستطيع بدء اللعبة.';
+      return;
+    }
+
+    // 3. Fetch all current players in this room fresh from the DB.
+    const { data: roomPlayers, error: playersErr } = await supabaseClient
+      .from('players')
+      .select('*')
+      .eq('room_id', roomId);
+    if(playersErr) throw playersErr;
+
+    // 4. Need at least two players.
+    if(!roomPlayers || roomPlayers.length < 2){
+      errEl.textContent = 'تحتاجون لاعبين اثنين على الأقل لبدء اللعبة.';
+      return;
+    }
+
+    // 5. "is_ready" is cosmetic-only in this design (a chip/toggle) — it is not
+    //    a real gate on starting the round anywhere else in the app, so it is
+    //    intentionally NOT enforced here either.
+
+    // 6. Pick a random Arabic letter.
     const letter = pickLetter();
+    // current_letter carries "letter||round" since rooms has no dedicated round
+    // column — round 1 for a fresh game start.
     const encoded = encodeLetterRound(letter, 1);
-    const { error } = await supabaseClient.from('rooms').update({ status:'playing', current_letter: encoded, stop_requested:false }).eq('id', currentRoomId);
-    if(error) throw error;
+
+    // 7. Update the room: status, current_letter, stop_requested.
+    const { data, error } = await supabaseClient
+      .from('rooms')
+      .update({ status: 'playing', current_letter: encoded, stop_requested: false })
+      .eq('id', roomId)
+      .select();
+
+    // 8. Never hide the real error behind a generic message.
+    if(error){
+      console.error('START GAME ERROR:', error);
+      console.error('message:', error?.message);
+      console.error('code:', error?.code);
+      console.error('details:', error?.details);
+      console.error('hint:', error?.hint);
+      errEl.textContent = 'تعذر بدء اللعبة: ' + (error.message || error.hint || error.code || 'خطأ غير معروف');
+      return;
+    }
+    if(!data || data.length === 0){
+      // UPDATE succeeded with no error but returned no row — usually means an
+      // RLS SELECT policy on rooms is hiding the row from the response, even
+      // though the write itself was allowed.
+      console.error('START GAME WARNING: update returned no row — check RLS SELECT policy on rooms for anon.');
+      errEl.textContent = 'تم التحديث لكن لم يصل تأكيد من القاعدة — تحقق من صلاحيات RLS على جدول rooms.';
+      return;
+    }
+    // 9/10. Success — the players' screens transition via the Realtime
+    // subscription on rooms (onRoomUpdate -> enterPlayScreenOnline), which
+    // renders the letter, enables the answer inputs, and starts the timer.
   }catch(e){
-    console.error(e);
-    errEl.textContent = 'تعذر بدء اللعبة، حاولي مرة أخرى.';
+    console.error('START GAME ERROR:', e);
+    console.error('message:', e?.message);
+    console.error('code:', e?.code);
+    console.error('details:', e?.details);
+    console.error('hint:', e?.hint);
+    errEl.textContent = 'تعذر بدء اللعبة: ' + (e?.message || e?.hint || e?.code || 'خطأ غير معروف');
   }
 }
 
@@ -1150,13 +1219,14 @@ async function pressStop(){
       .eq('id', currentRoomId);
     if(error) throw error;
   }catch(e){
-    console.error(e);
-    // Only a failure to stop the round itself is shown to the player.
+    console.error('stop_requested update failed:', e);
+    // Only a failure to stop the round itself is shown to the player —
+    // include the real error so the cause (missing column, RLS, etc.) is visible.
     btn.disabled = false;
     btn.innerHTML = `${ICONS.check} STOP 🛑`;
     document.querySelectorAll('#play-table input').forEach(i=>i.disabled=false);
     startRoundTimer();
-    alert('تعذر إيقاف الجولة');
+    alert('تعذر إيقاف الجولة: ' + (e?.message || e?.details || e?.hint || JSON.stringify(e)));
     return;
   }
 
