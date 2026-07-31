@@ -948,6 +948,38 @@ function showRealtimeWarning(){
   const el = document.getElementById('lobby-error') || document.getElementById('join-error');
   if(el) el.textContent = 'انقطع الاتصال المباشر، جرّبي تحديث الصفحة إذا توقفت التحديثات.';
 }
+/* Poll the room row directly as a safety net independent of Realtime.
+   If postgres_changes events on 'rooms' aren't reaching this client (most
+   commonly because Realtime replication isn't enabled for the table in the
+   Supabase dashboard), players would otherwise only see status/letter/
+   stop_requested changes after a manual refresh. This closes that gap by
+   re-checking the room every couple seconds for as long as the player is
+   in a room, feeding any change through the exact same onRoomUpdate() path
+   Realtime uses — so it's safe to run alongside Realtime with no duplicate
+   effects (onRoomUpdate's own guards, like lastEnteredRound and
+   stopHandled, prevent it from re-doing work it already did). */
+let roomPollInterval = null;
+function startRoomPoll(){
+  stopRoomPoll();
+  roomPollInterval = setInterval(async ()=>{
+    if(!currentRoomId){ stopRoomPoll(); return; }
+    try{
+      const { data, error } = await supabaseClient
+        .from('rooms')
+        .select('*')
+        .eq('id', currentRoomId)
+        .maybeSingle();
+      if(error) throw error;
+      if(data){
+        onRoomUpdate(data);
+        if(data.status === 'finished'){ stopRoomPoll(); }
+      }
+    }catch(e){ console.error('room poll error:', e); }
+  }, 2000);
+}
+function stopRoomPoll(){
+  if(roomPollInterval){ clearInterval(roomPollInterval); roomPollInterval = null; }
+}
 function onRoomUpdate(newRow){
   currentRoomRow = newRow;
   const parsed = parseLetterRound(newRow.current_letter);
@@ -966,12 +998,20 @@ function onRoomUpdate(newRow){
   } else if(newRow.status === 'results'){
     currentRound = parsed.round;
     currentLetter = parsed.letter;
-    loadAndRenderReview();
+    const reviewScreen = document.getElementById('screen-review');
+    if(!reviewScreen || !reviewScreen.classList.contains('active')){
+      loadAndRenderReview();
+    }
   } else if(newRow.status === 'finished'){
     renderFinalFromPlayers();
   } else if(newRow.status === 'waiting'){
     lastEnteredRound = 0;
-    enterLobby();
+    const lobbyScreen = document.getElementById('screen-lobby');
+    if(!lobbyScreen || !lobbyScreen.classList.contains('active')){
+      enterLobby();
+    } else {
+      refreshPlayers();
+    }
   }
 }
 function handleStopEvent(){
@@ -1033,6 +1073,7 @@ async function enterLobby(){
   try{
     subscribeRoomChannel(currentRoomId);
   }catch(e){ console.error('enterLobby: subscribeRoomChannel failed:', e); }
+  startRoomPoll();
   showScreen('screen-lobby');
   startLobbyPoll();
 }
@@ -1458,6 +1499,7 @@ async function renderFinalFromPlayers(){
 async function leaveRoom(){
   stopRoundTimer();
   stopLobbyPoll();
+  stopRoomPoll();
   unsubscribeChannel();
   if(currentPlayerId){
     try{
