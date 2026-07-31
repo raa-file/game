@@ -479,7 +479,8 @@
       <table class="round-table" id="play-table">
         <!-- filled by JS -->
       </table>
-      <button class="btn-seal" id="btn-stop" onclick="pressStop()" style="margin-top:16px;"><span id="icon-stop-btn"></span> خلصت!</button>
+      <button class="btn-seal" id="btn-stop" onclick="pressStop()" style="margin-top:16px;"><span id="icon-stop-btn"></span> STOP 🛑</button>
+      <div id="play-stop-msg" class="muted center-txt hidden" style="color:var(--seal); font-weight:bold; margin-top:10px;">🛑 توقف الوقت!</div>
     </div>
     <div class="card">
       <div class="muted" style="margin-bottom:8px;">حالة اللاعبين</div>
@@ -620,6 +621,7 @@ let realtimeChannel = null;
 let roundTimerInterval = null;
 let roundSeconds = 0;
 let isHost = false;
+let stopHandled = false;    // becomes true once this client has reacted to rooms.stop_requested for the current round
 
 /* ===================== UTIL ===================== */
 function roomCode(){ return String(Math.floor(1000 + Math.random()*9000)); }
@@ -948,7 +950,11 @@ function onRoomUpdate(newRow){
       currentRound = parsed.round;
       currentLetter = parsed.letter;
       submittedPlayerIds = new Set();
+      stopHandled = false;
       enterPlayScreenOnline();
+    }
+    if(newRow.stop_requested){
+      handleStopEvent();
     }
   } else if(newRow.status === 'results'){
     currentRound = parsed.round;
@@ -959,6 +965,22 @@ function onRoomUpdate(newRow){
   } else if(newRow.status === 'waiting'){
     lastEnteredRound = 0;
     enterLobby();
+  }
+}
+function handleStopEvent(){
+  if(stopHandled) return;
+  stopHandled = true;
+  stopRoundTimer();
+  const btn = document.getElementById('btn-stop');
+  if(btn){
+    btn.disabled = true;
+    btn.innerHTML = `${ICONS.check} STOP 🛑`;
+  }
+  document.querySelectorAll('#play-table input').forEach(i=>i.disabled=true);
+  const msgEl = document.getElementById('play-stop-msg');
+  if(msgEl) msgEl.classList.remove('hidden');
+  if(isHost){
+    hostFinalizeRound();
   }
 }
 function onAnswerInsert(row){
@@ -1039,7 +1061,7 @@ async function hostStartRound(){
   try{
     const letter = pickLetter();
     const encoded = encodeLetterRound(letter, 1);
-    const { error } = await supabaseClient.from('rooms').update({ status:'playing', current_letter: encoded }).eq('id', currentRoomId);
+    const { error } = await supabaseClient.from('rooms').update({ status:'playing', current_letter: encoded, stop_requested:false }).eq('id', currentRoomId);
     if(error) throw error;
   }catch(e){
     console.error(e);
@@ -1063,9 +1085,12 @@ function renderPlayScreen(cfg){
   }).join('');
   const btn = document.getElementById('btn-stop');
   btn.disabled = false;
-  btn.innerHTML = `${ICONS.check} خلصت!`;
+  btn.innerHTML = `${ICONS.check} STOP 🛑`;
   btn.classList.remove('pulsing');
   document.querySelectorAll('#play-table input').forEach(i=>i.disabled=false);
+  const msgEl = document.getElementById('play-stop-msg');
+  if(msgEl) msgEl.classList.add('hidden');
+  stopHandled = false;
   showScreen('screen-play');
   startRoundTimer();
   setTimeout(()=>{ const first = table.querySelector('input'); if(first) first.focus(); }, 100);
@@ -1107,27 +1132,30 @@ async function pressStop(){
     finishAIRound();
     return;
   }
+  if(stopHandled) return;
   stopRoundTimer();
   const btn = document.getElementById('btn-stop');
   btn.disabled = true;
-  btn.innerHTML = `${ICONS.check} تم الإرسال، بانتظار الباقي...`;
+  btn.innerHTML = `${ICONS.check} STOP 🛑`;
   document.querySelectorAll('#play-table input').forEach(i=>i.disabled=true);
   const row = { player_id: currentPlayerId, round_number: currentRound, letter: currentLetter };
   ALL_CATEGORIES.forEach(c=>{
     row[CATEGORY_DB_FIELD[c.id]] = (document.getElementById('input-'+c.id)?.value || '').trim();
   });
   try{
+    // Save this player's own answers exactly as they were the moment STOP was pressed.
     const { error } = await supabaseClient.from('answers').insert(row);
     if(error) throw error;
     submittedPlayerIds.add(currentPlayerId);
     renderPlayersStatus();
-    if(isHost && submittedPlayerIds.size >= currentPlayers.length){
-      hostFinalizeRound();
-    }
+    // Broadcast the stop immediately — every other player reacts via Realtime
+    // without anyone waiting for the rest to submit.
+    const { error: stopErr } = await supabaseClient.from('rooms').update({ stop_requested: true }).eq('id', currentRoomId);
+    if(stopErr) throw stopErr;
   }catch(e){
     console.error(e);
     btn.disabled = false;
-    btn.innerHTML = `${ICONS.check} خلصت!`;
+    btn.innerHTML = `${ICONS.check} STOP 🛑`;
     document.querySelectorAll('#play-table input').forEach(i=>i.disabled=false);
     startRoundTimer();
     alert('تعذر إرسال إجاباتك، حاولي مرة أخرى.');
@@ -1265,7 +1293,7 @@ async function hostNextRoundOnline(){
     const nextRound = currentRound + 1;
     const letter = pickLetter();
     const encoded = encodeLetterRound(letter, nextRound);
-    const { error } = await supabaseClient.from('rooms').update({ status:'playing', current_letter: encoded }).eq('id', currentRoomId);
+    const { error } = await supabaseClient.from('rooms').update({ status:'playing', current_letter: encoded, stop_requested:false }).eq('id', currentRoomId);
     if(error) throw error;
   }catch(e){
     console.error(e);
