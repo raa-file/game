@@ -403,7 +403,7 @@
         <div class="icon" id="icon-door"></div>
         <div class="txt"><strong>الانضمام لغرفة</strong><span>لديك رمز غرفة؟ ادخل به</span></div>
       </div>
-      <div class="menu-option" onclick="quickMatch()">
+      <div class="menu-option" id="menu-quickmatch" onclick="quickMatch()">
         <div class="icon" id="icon-dice"></div>
         <div class="txt"><strong>لعب عشوائي</strong><span>انضم لغرفة عامة مفتوحة الآن</span></div>
       </div>
@@ -426,7 +426,7 @@
       <div class="divider">تخصيص أسماء الفئات (اختياري)</div>
       <div class="muted" style="margin-bottom:10px;">تقدرين تغيّرين اسم أي فئة، مثلاً "إنسان" إلى "أكلات" أو "مطاعم"</div>
       <div id="create-category-inputs"></div>
-      <button class="btn-primary" onclick="createRoom()">إنشاء الغرفة</button>
+      <button class="btn-primary" id="btn-create-room" onclick="createRoom()">إنشاء الغرفة</button>
       <div id="create-error" class="muted" style="color:var(--seal); margin-top:8px;"></div>
     </div>
   </div>
@@ -440,7 +440,7 @@
       <h2 style="margin-top:0; font-size:1.2rem; font-family:'Tajawal', sans-serif; font-weight:700;">الانضمام لغرفة</h2>
       <label>رمز الغرفة</label>
       <input type="text" id="input-room-code" placeholder="مثال: 4821" maxlength="6">
-      <button class="btn-primary" onclick="joinRoomByCode()">دخول</button>
+      <button class="btn-primary" id="btn-join-room" onclick="joinRoomByCode()">دخول</button>
       <div id="join-error" class="muted" style="color:var(--seal); margin-top:8px;"></div>
     </div>
   </div>
@@ -572,76 +572,177 @@ const LETTERS = ['ا','ب','ت','ث','ج','ح','خ','د','ذ','ر','ز','س','ش
 // Simple offline "AI" dictionary: for each category + letter, a pool of plausible words.
 const AI_DICT = {
   human: {
-    'ا':['أحمد','إبراهيم','أسماء'], 'ب':['بدر','بسمة','بندر'], 'ت':['تركي','تهاني'], 'ث':['ثامر','ثريا'],
-    'ج':['جمال','جميلة'], 'ح':['حسن','حصة'], 'خ':['خالد','خلود'], 'د':['دانة','درويش'],
-    'ذ':['ذياب'], 'ر':['ريم','رامي'], 'ز':['زياد','زهرة'], 'س':['سارة','سلطان'],
-    'ش':['شهد','شاكر'], 'ص':['صالح','صفية'], 'ض':['ضاري'], 'ط':['طارق','طلال'],
-    'ظ':['ظافر'], 'ع':['علي','عبدالله'], 'غ':['غادة','غازي'], 'ف':['فهد','فاطمة'],
-    'ق':['قصي'], 'ك':['كريم','كوثر'], 'ل':['لمى','لطيفة'], 'م':['محمد','منى'],
-    'ن':['نورة','ناصر'], 'ه':['هند','هاشم'], 'و':['وليد','وفاء'], 'ي':['ياسر','ياسمين'],
+    'ا':['أحمد','إبراهيم','أسماء','أميرة','أنس','أنور','إيمان','أروى','أسامة','إياد','آدم','أميمة'],
+    'ب':['بدر','بسمة','بندر','بشير','بشرى','براء','بتول','بيان','باسل','بلال'],
+    'ت':['تركي','تهاني','تميم','توفيق','تولين'],
+    'ث':['ثامر','ثريا','ثابت'],
+    'ج':['جمال','جميلة','جواهر','جاسم','جهاد','جود','جنى'],
+    'ح':['حسن','حصة','حمد','حاتم','حنان','حازم','حور','حسين','حسام'],
+    'خ':['خالد','خلود','خديجة','خلف','خليل','خزنة'],
+    'د':['دانة','درويش','داود','ديمة','دلال'],
+    'ذ':['ذياب','ذكرى'],
+    'ر':['ريم','رامي','رنا','رهف','رائد','روان','راشد','رغد'],
+    'ز':['زياد','زهرة','زينب','زهير','زكريا','زاهر'],
+    'س':['سارة','سلطان','سعد','سلمى','سعود','سمر','سلمان','سيف'],
+    'ش':['شهد','شاكر','شيخة','شريفة','شذى','شوق'],
+    'ص':['صالح','صفية','صقر','صهيب','صفاء'],
+    'ض':['ضاري','ضياء','ضحى'],
+    'ط':['طارق','طلال','طيبة','طه','طامي'],
+    'ظ':['ظافر','ظبية'],
+    'ع':['علي','عبدالله','عمر','عائشة','عبير','عزام','عهد','عزيز'],
+    'غ':['غادة','غازي','غيداء','غيث'],
+    'ف':['فهد','فاطمة','فيصل','فراس','فوز','فايز','فجر'],
+    'ق':['قصي','قمر','قيس'],
+    'ك':['كريم','كوثر','كمال','كنانة','كاظم'],
+    'ل':['لمى','لطيفة','ليان','لجين','لؤي'],
+    'م':['محمد','منى','مريم','ماجد','منصور','مشعل','ملاك','مها','مضاوي'],
+    'ن':['نورة','ناصر','نجلاء','نايف','نوف','نبيل','نضال'],
+    'ه':['هند','هاشم','هيا','هتون','هارون'],
+    'و':['وليد','وفاء','وضحاء','وسام','وئام'],
+    'ي':['ياسر','ياسمين','يوسف','يزيد','يارا']
   },
   animal: {
-    'ا':['أسد','أرنب'], 'ب':['بقرة','بطة'], 'ت':['تمساح','ثعلب'], 'ث':['ثعبان'],
-    'ج':['جمل','جرذ'], 'ح':['حصان','حمار'], 'خ':['خروف','خفاش'], 'د':['دجاجة','دب'],
-    'ذ':['ذئب'], 'ر':['رخم'], 'ز':['زرافة'], 'س':['سلحفاة','سمكة'],
-    'ش':['شبل'], 'ص':['صقر'], 'ض':['ضفدع'], 'ط':['طاووس'],
-    'ظ':['ظبي'], 'ع':['عصفور','عنكبوت'], 'غ':['غزال'], 'ف':['فيل','فراشة'],
-    'ق':['قرد','قط'], 'ك':['كلب','كنغر'], 'ل':['لبؤة'], 'م':['ماعز'],
-    'ن':['نمر','نعامة'], 'ه':['هدهد'], 'و':['وطواط'], 'ي':['يمامة'],
+    'ا':['أسد','أرنب','أفعى','أخطبوط','إبل','أوز'],
+    'ب':['بقرة','بطة','ببغاء','بعوضة','بومة'],
+    'ت':['تمساح','تيس'],
+    'ث':['ثور','ثعبان','ثعلب'],
+    'ج':['جمل','جرذ','جاموس','جعل','جرو'],
+    'ح':['حصان','حمار','حوت','حية','حمامة','حلزون'],
+    'خ':['خروف','خفاش','خنزير','خيل'],
+    'د':['دجاجة','دب','دلفين','ديك','دودة'],
+    'ذ':['ذئب','ذبابة'],
+    'ر':['رخم','رنة'],
+    'ز':['زرافة'],
+    'س':['سلحفاة','سمكة','سنجاب','سرطان'],
+    'ش':['شبل','شاة','شمبانزي'],
+    'ص':['صقر','صرصور'],
+    'ض':['ضفدع','ضبع','ضب'],
+    'ط':['طاووس','طائر'],
+    'ظ':['ظبي'],
+    'ع':['عصفور','عنكبوت','عقرب','عنزة'],
+    'غ':['غزال','غراب','غوريلا'],
+    'ف':['فيل','فراشة','فهد','فأر'],
+    'ق':['قرد','قط','قنفذ','قطة'],
+    'ك':['كلب','كنغر','كوالا'],
+    'ل':['لبؤة','لقلق'],
+    'م':['ماعز','ماموث'],
+    'ن':['نمر','نعامة','نمس','نحلة','نسر'],
+    'ه':['هدهد'],
+    'و':['وطواط','وعل'],
+    'ي':['يمامة']
   },
   plant: {
-    'ا':['أرز','أضاليا'], 'ب':['بصل','برتقال'], 'ت':['تفاح','توت'], 'ث':['ثوم'],
-    'ج':['جزر','جوافة'], 'ح':['حنطة'], 'خ':['خس','خوخ'], 'د':['دوار الشمس'],
-    'ذ':['ذرة'], 'ر':['رمان','ريحان'], 'ز':['زيتون','زعتر'], 'س':['سبانخ'],
-    'ش':['شعير'], 'ص':['صبار'], 'ض':[], 'ط':['طماطم'],
-    'ظ':[], 'ع':['عنب'], 'غ':[], 'ف':['فراولة','فلفل'],
-    'ق':['قرنفل','قمح'], 'ك':['كرز','كمثرى'], 'ل':['ليمون'], 'م':['موز'],
-    'ن':['نعناع'], 'ه':[], 'و':['ورد'], 'ي':['ياسمين'],
+    'ا':['أرز','أضاليا','أناناس','أثل'],
+    'ب':['بصل','برتقال','بطاطس','باذنجان','بابونج'],
+    'ت':['تفاح','توت','تمر','تين'],
+    'ث':['ثوم','ثمر'],
+    'ج':['جزر','جوافة','جوز'],
+    'ح':['حنطة','حبة سوداء'],
+    'خ':['خس','خوخ','خيار','خزامى'],
+    'د':['دوار الشمس','دراق'],
+    'ذ':['ذرة'],
+    'ر':['رمان','ريحان','رقي'],
+    'ز':['زيتون','زعتر','زنجبيل','زهرة'],
+    'س':['سبانخ','سمسم'],
+    'ش':['شعير','شمام'],
+    'ص':['صبار','صنوبر'],
+    'ض':[],
+    'ط':['طماطم','طلح'],
+    'ظ':[],
+    'ع':['عنب','عدس'],
+    'غ':[],
+    'ف':['فراولة','فلفل','فول','فستق'],
+    'ق':['قرنفل','قمح','قرع','قسطل'],
+    'ك':['كرز','كمثرى','كرفس','كوسا'],
+    'ل':['ليمون','لوز','لفت'],
+    'م':['موز','ملفوف'],
+    'ن':['نعناع','نخيل','نبق'],
+    'ه':[],
+    'و':['ورد','ورق عنب'],
+    'ي':['ياسمين','يقطين']
   },
   object: {
-    'ا':['أريكة'], 'ب':['باب','بطانية'], 'ت':['تلفاز'], 'ث':['ثلاجة'],
-    'ج':['جدار','جرس'], 'ح':['حقيبة'], 'خ':['خزانة'], 'د':['دفتر','درج'],
-    'ذ':[], 'ر':['رف'], 'ز':['زجاجة'], 'س':['سرير','ساعة'],
-    'ش':['شباك'], 'ص':['صحن'], 'ض':['ضوء'], 'ط':['طاولة'],
-    'ظ':['ظرف'], 'ع':['علبة'], 'غ':['غطاء'], 'ف':['فرشاة','فنجان'],
-    'ق':['قلم','قدر'], 'ك':['كرسي','كأس'], 'ل':['لوحة'], 'م':['مقص','مرآة'],
-    'ن':['نافذة'], 'ه':['هاتف'], 'و':['وسادة'], 'ي':[],
+    'ا':['أريكة','إبريق','أسطوانة','أنبوب'],
+    'ب':['باب','بطانية','براد','بساط'],
+    'ت':['تلفاز','ترمس'],
+    'ث':['ثلاجة'],
+    'ج':['جدار','جرس','جوال'],
+    'ح':['حقيبة','حبل','حذاء'],
+    'خ':['خزانة','خيمة','خاتم'],
+    'د':['دفتر','درج','دلو','دبوس'],
+    'ذ':[],
+    'ر':['رف','ريموت'],
+    'ز':['زجاجة','زر'],
+    'س':['سرير','ساعة','سكين','سجادة'],
+    'ش':['شباك','شمعة','شنطة'],
+    'ص':['صحن','صندوق','صابون'],
+    'ض':['ضوء'],
+    'ط':['طاولة','طبق'],
+    'ظ':['ظرف'],
+    'ع':['علبة','عصا'],
+    'غ':['غطاء','غسالة'],
+    'ف':['فرشاة','فنجان','فراش'],
+    'ق':['قلم','قدر','قفل','قماش'],
+    'ك':['كرسي','كأس','كتاب','كوب'],
+    'ل':['لوحة','لعبة'],
+    'م':['مقص','مرآة','مطرقة','محفظة'],
+    'ن':['نافذة','نظارة'],
+    'ه':['هاتف'],
+    'و':['وسادة','وعاء'],
+    'ي':[]
   },
   country: {
-    'ا':['ألمانيا','أستراليا'], 'ب':['البرازيل','بلجيكا'], 'ت':['تركيا','تونس'], 'ث':[],
-    'ج':['جورجيا'], 'ح':[], 'خ':[], 'د':['الدنمارك'],
-    'ذ':[], 'ر':['روسيا'], 'ز':[], 'س':['السعودية','سويسرا'],
-    'ش':[], 'ص':['الصين'], 'ض':[], 'ط':[],
-    'ظ':[], 'ع':['عمان'], 'غ':[], 'ف':['فرنسا','فنلندا'],
-    'ق':['قطر'], 'ك':['كندا','كوريا'], 'ل':['لبنان','ليبيا'], 'م':['مصر','المغرب'],
-    'ن':['النرويج'], 'ه':['الهند','هولندا'], 'و':[], 'ي':['اليابان','اليمن'],
+    'ا':['أذربيجان','أرمينيا','أستراليا','ألمانيا','الأرجنتين','الأردن','إسبانيا','إيطاليا','إيران','إندونيسيا','أوغندا','أوكرانيا','أفغانستان','أوروغواي','إريتريا','الإمارات','أنغولا','إثيوبيا'],
+    'ب':['البرازيل','بلجيكا','بريطانيا','بنما','بنغلاديش','بلغاريا','بوليفيا','بورما','البحرين','بورندي'],
+    'ت':['تركيا','تونس','تايلاند','تشاد','تنزانيا','تشيلي','تايوان'],
+    'ث':[],
+    'ج':['جورجيا','جامايكا','جيبوتي','جنوب أفريقيا','جزر المالديف'],
+    'ح':[],
+    'خ':[],
+    'د':['الدنمارك'],
+    'ذ':[],
+    'ر':['روسيا','رواندا','رومانيا'],
+    'ز':[],
+    'س':['السعودية','سويسرا','سوريا','السودان','السنغال','سنغافورة','سلوفينيا'],
+    'ش':[],
+    'ص':['الصين','صربيا'],
+    'ض':[],
+    'ط':[],
+    'ظ':[],
+    'ع':['عمان','العراق'],
+    'غ':['غانا','غينيا'],
+    'ف':['فرنسا','فنلندا','الفلبين','فنزويلا'],
+    'ق':['قطر','قبرص','قيرغيزستان'],
+    'ك':['كازاخستان','كندا','كوريا','كوبا','كولومبيا','الكويت','كينيا','كرواتيا','كمبوديا'],
+    'ل':['لبنان','ليبيا','لاتفيا','لوكسمبورغ','ليتوانيا'],
+    'م':['مصر','المغرب','ماليزيا','المكسيك','موريتانيا','موزمبيق','موناكو'],
+    'ن':['النرويج','نيجيريا','نيوزيلندا','ناميبيا','النمسا','نيبال'],
+    'ه':['الهند','هولندا','هنغاريا','هندوراس'],
+    'و':[],
+    'ي':['اليابان','اليمن','اليونان']
   }
 };
 
 /* ===================== SMART ANSWER CHECK (lightweight "AI") ===================== */
-// Builds a reverse lookup: normalized word -> set of category ids it's known to belong to,
-// using the same word lists the offline AI opponent already uses. This lets us catch the
-// case where a player writes a word from a *different* category (e.g. an animal name typed
-// under "بلاد/ مدينة") and score it as 0 even though it starts with the right letter.
-const CATEGORY_WORD_INDEX = {};
+// Builds a lookup of normalized words known to belong to each category, using the
+// same word bank the offline AI opponent draws from. An answer only scores if it
+// starts with the round's letter AND is a real, known word for that category —
+// so random/scrambled letters (or a word from the wrong category, e.g. an animal
+// name typed under "بلاد/ مدينة") never earn points, even if the first letter matches.
+const CATEGORY_WORD_SET = {};
 Object.keys(AI_DICT).forEach(catId=>{
+  CATEGORY_WORD_SET[catId] = new Set();
   Object.values(AI_DICT[catId]).forEach(list=>{
     (list||[]).forEach(word=>{
       const n = norm(word);
-      if(!n) return;
-      if(!CATEGORY_WORD_INDEX[n]) CATEGORY_WORD_INDEX[n] = new Set();
-      CATEGORY_WORD_INDEX[n].add(catId);
+      if(n) CATEGORY_WORD_SET[catId].add(n);
     });
   });
 });
-// Returns true only if the answer starts with the round letter AND isn't a known word
-// belonging to some other category (so an animal name under "بلاد/ مدينة" won't score).
 function isValidCategoryAnswer(answer, catId, letter){
   if(!startsWithLetter(answer, letter)) return false;
   const n = norm(answer);
-  const knownCats = CATEGORY_WORD_INDEX[n];
-  if(knownCats && knownCats.size > 0 && !knownCats.has(catId)) return false;
-  return true;
+  return CATEGORY_WORD_SET[catId] ? CATEGORY_WORD_SET[catId].has(n) : true;
 }
 
 /* ===================== STATE ===================== */
@@ -660,6 +761,11 @@ let realtimeChannel = null;
 let roundTimerInterval = null;
 let roundSeconds = 0;
 let isHost = false;
+// Guards createRoom/joinRoomByCode/quickMatch against double-taps: on a slow
+// connection a second tap before the first request finishes used to insert a
+// second "players" row for the same person, which is why some players briefly
+// showed up twice in the lobby. Only one of these three can run at a time.
+let roomActionInProgress = false;
 let stopHandled = false;    // becomes true once this client has reacted to rooms.stop_requested for the current round
 let categoryLabels = {};    // { [categoryId]: customLabel } — overrides for the current room only
 function getCatLabel(catId){
@@ -798,6 +904,7 @@ function applyCategoryLabelsFromRoom(room){
 }
 
 async function createRoom(){
+  if(roomActionInProgress) return;
   const errEl = document.getElementById('create-error');
   errEl.textContent = '';
   if(!myName){ errEl.textContent = 'أدخل اسمك أولاً.'; showScreen('screen-name'); return; }
@@ -805,6 +912,9 @@ async function createRoom(){
   maxPlayers = Math.max(2, Math.min(10, maxPlayers));
   const customLabels = readCategoryInputs('create-cat');
   const hasCustomLabels = ALL_CATEGORIES.some(c=>customLabels[c.id] !== c.label);
+  roomActionInProgress = true;
+  const btn = document.getElementById('btn-create-room');
+  if(btn) btn.disabled = true;
   try{
     const code = await ensureUniqueRoomCode();
     const roomInsert = { room_code: code, status: 'waiting', current_letter: null, max_players: maxPlayers };
@@ -841,16 +951,23 @@ async function createRoom(){
   }catch(e){
     console.error('createRoom error:', e);
     errEl.textContent = 'تعذر إنشاء الغرفة: ' + (e?.message || e?.hint || e?.code || 'تأكدي من الاتصال وحاولي مرة أخرى.');
+  }finally{
+    roomActionInProgress = false;
+    if(btn) btn.disabled = false;
   }
 }
 
 /* ===================== JOIN ROOM ===================== */
 async function joinRoomByCode(){
+  if(roomActionInProgress) return;
   const code = document.getElementById('input-room-code').value.trim();
   const errEl = document.getElementById('join-error');
   errEl.textContent = '';
   if(!myName){ errEl.textContent = 'أدخل اسمك أولاً.'; showScreen('screen-name'); return; }
   if(!code){ errEl.textContent = 'أدخلي رقم الغرفة.'; return; }
+  roomActionInProgress = true;
+  const btn = document.getElementById('btn-join-room');
+  if(btn) btn.disabled = true;
   try{
     const { data: room, error } = await supabaseClient.from('rooms').select('*').eq('room_code', code).maybeSingle();
     if(error) throw error;
@@ -873,12 +990,19 @@ async function joinRoomByCode(){
   }catch(e){
     console.error('joinRoomByCode error:', e);
     errEl.textContent = 'تعذر الانضمام: ' + (e?.message || e?.hint || e?.code || 'حاولي مرة أخرى.');
+  }finally{
+    roomActionInProgress = false;
+    if(btn) btn.disabled = false;
   }
 }
 
 /* ===================== QUICK MATCH ===================== */
 async function quickMatch(){
+  if(roomActionInProgress) return;
   if(!myName){ showScreen('screen-name'); return; }
+  roomActionInProgress = true;
+  const opt = document.getElementById('menu-quickmatch');
+  if(opt) opt.style.pointerEvents = 'none';
   try{
     const { data: rooms, error } = await supabaseClient
       .from('rooms')
@@ -926,6 +1050,9 @@ async function quickMatch(){
   }catch(e){
     console.error(e);
     alert('تعذر الانضمام للعب العشوائي، حاولي مرة أخرى.');
+  }finally{
+    roomActionInProgress = false;
+    if(opt) opt.style.pointerEvents = '';
   }
 }
 
