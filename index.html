@@ -482,6 +482,10 @@
       <span class="back-link" onclick="leaveRoom()">‹ مغادرة الغرفة</span>
     </div>
     <div class="card center-txt">
+      <div class="status-bar" id="play-room-code-bar" style="justify-content:center; gap:8px;">
+        <span>رمز الغرفة</span>
+        <span class="room-code" id="play-room-code">----</span>
+      </div>
       <div class="letter-seal" id="play-letter">أ</div>
       <div class="muted" id="play-round-label">الجولة 1 من 5</div>
     </div>
@@ -504,6 +508,10 @@
       <span class="back-link" onclick="leaveRoom()">‹ مغادرة الغرفة</span>
     </div>
     <div class="card center-txt">
+      <div class="status-bar" id="review-room-code-bar" style="justify-content:center; gap:8px;">
+        <span>رمز الغرفة</span>
+        <span class="room-code" id="review-room-code">----</span>
+      </div>
       <h2 style="margin:0; font-size:1.3rem;">نتائج الجولة</h2>
       <div class="muted">الحرف: <b id="review-letter" style="color:var(--seal);"></b></div>
     </div>
@@ -739,9 +747,23 @@ Object.keys(AI_DICT).forEach(catId=>{
     });
   });
 });
+// Is this category currently using a name the host typed in (e.g. "إنسان" -> "أكلات")?
+function isCustomCategory(catId){
+  const cat = ALL_CATEGORIES.find(c=>c.id===catId);
+  return !!(categoryLabels && categoryLabels[catId] && cat && categoryLabels[catId] !== cat.label);
+}
 function isValidCategoryAnswer(answer, catId, letter){
   if(!startsWithLetter(answer, letter)) return false;
   const n = norm(answer);
+  if(isCustomCategory(catId)){
+    // We don't have a ready-made word bank for whatever theme the host typed
+    // in (أكلات، مطاعم...), so the only fair check left is the starting
+    // letter. We don't reject just because the word happens to also appear
+    // in one of the built-in lists (e.g. "فهد" is both a human name and an
+    // animal) — a word belonging to more than one category is normal and
+    // shouldn't count against the player.
+    return true;
+  }
   return CATEGORY_WORD_SET[catId] ? CATEGORY_WORD_SET[catId].has(n) : true;
 }
 
@@ -972,7 +994,7 @@ async function joinRoomByCode(){
     const { data: room, error } = await supabaseClient.from('rooms').select('*').eq('room_code', code).maybeSingle();
     if(error) throw error;
     if(!room){ errEl.textContent = 'الغرفة غير موجودة.'; return; }
-    if(room.status !== 'waiting'){ errEl.textContent = 'اللعبة في هذي الغرفة بدأت بالفعل.'; return; }
+    if(room.status === 'finished'){ errEl.textContent = 'انتهت اللعبة في هذي الغرفة.'; return; }
     const { data: playersNow, error: pErr } = await supabaseClient.from('players').select('id').eq('room_id', room.id);
     if(pErr) throw pErr;
     if(playersNow && playersNow.length >= room.max_players){ errEl.textContent = 'الغرفة ممتلئة.'; return; }
@@ -986,7 +1008,25 @@ async function joinRoomByCode(){
     currentRoomMode = 'private';
     currentRoomRow = room;
     applyCategoryLabelsFromRoom(room);
-    await enterLobby();
+    // The room might already be mid-round or showing results when someone joins
+    // late (via a code shared during the game) — route them straight to the
+    // matching screen instead of always dropping them in the waiting lobby.
+    const parsed = parseLetterRound(room.current_letter);
+    currentRound = parsed.round;
+    currentLetter = parsed.letter;
+    if(room.status === 'playing'){
+      lastEnteredRound = parsed.round;
+      subscribeRoomChannel(currentRoomId);
+      await refreshPlayers();
+      await refreshSubmittedForCurrentRound();
+      enterPlayScreenOnline();
+    } else if(room.status === 'results'){
+      subscribeRoomChannel(currentRoomId);
+      await refreshPlayers();
+      await loadAndRenderReview();
+    } else {
+      await enterLobby();
+    }
   }catch(e){
     console.error('joinRoomByCode error:', e);
     errEl.textContent = 'تعذر الانضمام: ' + (e?.message || e?.hint || e?.code || 'حاولي مرة أخرى.');
@@ -1128,6 +1168,8 @@ function finishAIRound(){
   renderAIReview();
 }
 function renderAIReview(){
+  const codeBar = document.getElementById('review-room-code-bar');
+  if(codeBar) codeBar.classList.add('hidden');
   document.getElementById('review-letter').textContent = aiState.letter;
   let html = '';
   aiState.categories.forEach(cid=>{
@@ -1514,6 +1556,14 @@ async function hostStartRound(){
 
 /* ===================== PLAY SCREEN ===================== */
 function renderPlayScreen(cfg){
+  const codeBar = document.getElementById('play-room-code-bar');
+  if(currentRoomMode === 'ai'){
+    if(codeBar) codeBar.classList.add('hidden');
+  } else {
+    if(codeBar) codeBar.classList.remove('hidden');
+    const codeEl = document.getElementById('play-room-code');
+    if(codeEl) codeEl.textContent = currentRoomCode || '----';
+  }
   document.getElementById('play-letter').textContent = cfg.letter;
   document.getElementById('play-round-label').textContent = cfg.totalRounds
     ? `الجولة ${cfg.round} من ${cfg.totalRounds}`
@@ -1690,6 +1740,10 @@ async function loadAndRenderReview(){
   }catch(e){ console.error(e); }
 }
 function renderOnlineReview(byPlayer){
+  const codeBar = document.getElementById('review-room-code-bar');
+  if(codeBar) codeBar.classList.remove('hidden');
+  const codeEl = document.getElementById('review-room-code');
+  if(codeEl) codeEl.textContent = currentRoomCode || '----';
   document.getElementById('review-letter').textContent = currentLetter;
   const playerIds = currentPlayers.map(p=>p.id);
   const counts = {};
