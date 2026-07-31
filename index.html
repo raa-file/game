@@ -1041,8 +1041,10 @@ function renderLobbyPlayers(){
 function renderLobbyControls(){
   document.getElementById('lobby-host-controls').classList.toggle('hidden', !isHost);
   document.getElementById('lobby-waiting-msg').classList.toggle('hidden', isHost);
-  const startBtn = document.getElementById('btn-start-round');
-  startBtn.disabled = currentPlayers.length < 2;
+  // Note: the start button is intentionally NEVER disabled here. A disabled
+  // button produces zero feedback when clicked (no error, no message) — it
+  // just silently does nothing, which is confusing. hostStartRound() itself
+  // checks the player count and shows a clear message if it's not met yet.
   const readyBtn = document.getElementById('btn-ready');
   const me = currentPlayers.find(p=>p.id === currentPlayerId);
   if(me && readyBtn){
@@ -1058,6 +1060,7 @@ async function toggleReady(){
   }catch(e){ console.error(e); }
 }
 async function hostStartRound(){
+  console.log('hostStartRound clicked', { currentRoomId, currentPlayerId, isHost });
   const errEl = document.getElementById('lobby-error');
   errEl.textContent = '';
 
