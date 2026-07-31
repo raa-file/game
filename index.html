@@ -1004,8 +1004,13 @@ function onRoomUpdate(newRow){
       submittedPlayerIds = new Set();
       stopHandled = false;
       enterPlayScreenOnline();
-    }
-    if(newRow.stop_requested){
+      // A round that's JUST starting is always meant to be fresh and playable.
+      // Don't also check stop_requested from this same payload — if it hasn't
+      // visibly flipped back to false yet for this exact read, that would
+      // immediately re-freeze a round that only just started, making STOP
+      // (and everything else) look completely unresponsive. The next update
+      // (Realtime or the 2s poll) will correctly reflect stop_requested.
+    } else if(newRow.stop_requested){
       handleStopEvent();
     }
   } else if(newRow.status === 'results'){
