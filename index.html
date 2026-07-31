@@ -959,28 +959,44 @@ function showRealtimeWarning(){
    effects (onRoomUpdate's own guards, like lastEnteredRound and
    stopHandled, prevent it from re-doing work it already did). */
 let roomPollInterval = null;
+async function pollRoomOnce(){
+  if(!currentRoomId) return;
+  try{
+    const { data, error } = await supabaseClient
+      .from('rooms')
+      .select('*')
+      .eq('id', currentRoomId)
+      .maybeSingle();
+    if(error) throw error;
+    if(data){
+      onRoomUpdate(data);
+      if(data.status === 'finished'){ stopRoomPoll(); }
+    }
+  }catch(e){ console.error('room poll error:', e); }
+}
 function startRoomPoll(){
   stopRoomPoll();
-  roomPollInterval = setInterval(async ()=>{
+  roomPollInterval = setInterval(()=>{
     if(!currentRoomId){ stopRoomPoll(); return; }
-    try{
-      const { data, error } = await supabaseClient
-        .from('rooms')
-        .select('*')
-        .eq('id', currentRoomId)
-        .maybeSingle();
-      if(error) throw error;
-      if(data){
-        onRoomUpdate(data);
-        if(data.status === 'finished'){ stopRoomPoll(); }
-      }
-    }catch(e){ console.error('room poll error:', e); }
+    pollRoomOnce();
   }, 2000);
 }
 function stopRoomPoll(){
   if(roomPollInterval){ clearInterval(roomPollInterval); roomPollInterval = null; }
 }
+// Mobile browsers throttle timers and can stall the Realtime websocket while
+// a tab/app is backgrounded (screen locked, switched app, etc). That's a very
+// common reason one player's screen updates instantly while another player's
+// phone — sitting backgrounded at that exact moment — only catches up late.
+// Force an immediate re-check the moment a player's tab becomes visible again.
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible' && currentRoomId){
+    console.log('[room] tab became visible again — checking room state now');
+    pollRoomOnce();
+  }
+});
 function onRoomUpdate(newRow){
+  console.log('[room update]', { status: newRow.status, current_letter: newRow.current_letter, stop_requested: newRow.stop_requested, lastEnteredRound });
   currentRoomRow = newRow;
   const parsed = parseLetterRound(newRow.current_letter);
   if(newRow.status === 'playing'){
@@ -1016,6 +1032,7 @@ function onRoomUpdate(newRow){
 }
 function handleStopEvent(){
   if(stopHandled) return;
+  console.log('[STOP] handleStopEvent firing on this client, isHost=', isHost);
   stopHandled = true;
   stopRoundTimer();
   const btn = document.getElementById('btn-stop');
@@ -1291,11 +1308,17 @@ async function pressStop(){
   document.querySelectorAll('#play-table input').forEach(i=>i.disabled=true);
 
   try{
+    console.log('[STOP] sending stop_requested=true for room', currentRoomId);
     const { data, error } = await supabaseClient
       .from('rooms')
       .update({ stop_requested: true })
-      .eq('id', currentRoomId);
+      .eq('id', currentRoomId)
+      .select();
     if(error) throw error;
+    console.log('[STOP] update response, rows affected:', data);
+    if(!data || data.length === 0){
+      console.error('[STOP] WARNING: update matched 0 rows — currentRoomId may be wrong/stale:', currentRoomId);
+    }
   }catch(e){
     console.error('stop_requested update failed:', e);
     // Only a failure to stop the round itself is shown to the player —
