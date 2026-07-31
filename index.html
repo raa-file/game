@@ -1133,32 +1133,50 @@ async function pressStop(){
     return;
   }
   if(stopHandled) return;
+
+  // STOP must not depend on saving answers. Freeze the UI immediately, then make
+  // rooms.stop_requested the single critical update. Saving this player's own
+  // answers happens after, best-effort, and can never block or undo the stop.
   stopRoundTimer();
   const btn = document.getElementById('btn-stop');
   btn.disabled = true;
   btn.innerHTML = `${ICONS.check} STOP 🛑`;
   document.querySelectorAll('#play-table input').forEach(i=>i.disabled=true);
-  const row = { player_id: currentPlayerId, round_number: currentRound, letter: currentLetter };
-  ALL_CATEGORIES.forEach(c=>{
-    row[CATEGORY_DB_FIELD[c.id]] = (document.getElementById('input-'+c.id)?.value || '').trim();
-  });
+
   try{
-    // Save this player's own answers exactly as they were the moment STOP was pressed.
-    const { error } = await supabaseClient.from('answers').insert(row);
+    const { data, error } = await supabaseClient
+      .from('rooms')
+      .update({ stop_requested: true })
+      .eq('id', currentRoomId);
     if(error) throw error;
-    submittedPlayerIds.add(currentPlayerId);
-    renderPlayersStatus();
-    // Broadcast the stop immediately — every other player reacts via Realtime
-    // without anyone waiting for the rest to submit.
-    const { error: stopErr } = await supabaseClient.from('rooms').update({ stop_requested: true }).eq('id', currentRoomId);
-    if(stopErr) throw stopErr;
   }catch(e){
     console.error(e);
+    // Only a failure to stop the round itself is shown to the player.
     btn.disabled = false;
     btn.innerHTML = `${ICONS.check} STOP 🛑`;
     document.querySelectorAll('#play-table input').forEach(i=>i.disabled=false);
     startRoundTimer();
-    alert('تعذر إرسال إجاباتك، حاولي مرة أخرى.');
+    alert('تعذر إيقاف الجولة');
+    return;
+  }
+
+  // Best-effort save of this player's own answers as they were at the moment of
+  // STOP. Skip if already saved; if saving fails, the round has already stopped
+  // for everyone and this player's unsent fields simply count as 0 later.
+  if(!submittedPlayerIds.has(currentPlayerId)){
+    const row = { player_id: currentPlayerId, round_number: currentRound, letter: currentLetter };
+    ALL_CATEGORIES.forEach(c=>{
+      row[CATEGORY_DB_FIELD[c.id]] = (document.getElementById('input-'+c.id)?.value || '').trim();
+    });
+    try{
+      const { error: answersErr } = await supabaseClient.from('answers').insert(row);
+      if(answersErr) throw answersErr;
+      submittedPlayerIds.add(currentPlayerId);
+      renderPlayersStatus();
+    }catch(e){
+      console.error(e);
+      // Intentionally silent: a failed answer save never blocks or reverses STOP.
+    }
   }
 }
 async function refreshSubmittedForCurrentRound(){
