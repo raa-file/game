@@ -724,8 +724,8 @@ async function createRoom(){
     currentRoomRow = roomData;
     await enterLobby();
   }catch(e){
-    console.error(e);
-    errEl.textContent = 'تعذر إنشاء الغرفة، تأكدي من الاتصال وحاولي مرة أخرى.';
+    console.error('createRoom error:', e);
+    errEl.textContent = 'تعذر إنشاء الغرفة: ' + (e?.message || e?.hint || e?.code || 'تأكدي من الاتصال وحاولي مرة أخرى.');
   }
 }
 
@@ -755,8 +755,8 @@ async function joinRoomByCode(){
     currentRoomRow = room;
     await enterLobby();
   }catch(e){
-    console.error(e);
-    errEl.textContent = 'تعذر الاتصال بالخادم، حاولي مرة أخرى.';
+    console.error('joinRoomByCode error:', e);
+    errEl.textContent = 'تعذر الانضمام: ' + (e?.message || e?.hint || e?.code || 'حاولي مرة أخرى.');
   }
 }
 
@@ -1002,12 +1002,39 @@ function onAnswerInsert(row){
 }
 
 /* ===================== LOBBY ===================== */
+let lobbyPollInterval = null;
+function startLobbyPoll(){
+  stopLobbyPoll();
+  // Safety net: even if Supabase Realtime isn't delivering postgres_changes
+  // events (e.g. replication not enabled for the players table in the
+  // Supabase dashboard), the lobby still catches up within a few seconds.
+  lobbyPollInterval = setInterval(()=>{
+    const lobbyScreen = document.getElementById('screen-lobby');
+    if(!lobbyScreen || !lobbyScreen.classList.contains('active')){
+      stopLobbyPoll();
+      return;
+    }
+    refreshPlayers();
+  }, 3000);
+}
+function stopLobbyPoll(){
+  if(lobbyPollInterval){ clearInterval(lobbyPollInterval); lobbyPollInterval = null; }
+}
 async function enterLobby(){
   document.getElementById('lobby-room-code').textContent = currentRoomCode || '----';
   document.getElementById('lobby-error').textContent = '';
-  await refreshPlayers();
-  subscribeRoomChannel(currentRoomId);
+  // Never let a failure here block showing the lobby screen — the player has
+  // already been created/joined in the DB at this point, so getting stuck on
+  // the previous screen (which looks like "won't let me in until I refresh")
+  // must not happen just because a refresh or subscribe call had trouble.
+  try{
+    await refreshPlayers();
+  }catch(e){ console.error('enterLobby: refreshPlayers failed:', e); }
+  try{
+    subscribeRoomChannel(currentRoomId);
+  }catch(e){ console.error('enterLobby: subscribeRoomChannel failed:', e); }
   showScreen('screen-lobby');
+  startLobbyPoll();
 }
 async function refreshPlayers(){
   if(!currentRoomId) return;
@@ -1430,6 +1457,7 @@ async function renderFinalFromPlayers(){
 /* ===================== LEAVE / CLEANUP ===================== */
 async function leaveRoom(){
   stopRoundTimer();
+  stopLobbyPoll();
   unsubscribeChannel();
   if(currentPlayerId){
     try{
