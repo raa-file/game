@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>إنسان، حيوان، نبات، جماد، بلاد</title>
+<title>إنسان، حيوان، نبات، جماد، بلاد/ مدينة</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rakkas&family=Aref+Ruqaa:wght@400;700&family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
@@ -376,7 +376,7 @@
 <div class="wrap">
 
   <div class="brand">
-    <h1>إنسان، حيوان، نبات، جماد، بلاد</h1>
+    <h1>إنسان، حيوان، نبات، جماد، بلاد/ مدينة</h1>
     <div class="sub">لعبة الحروف الكلاسيكية — أونلاين مع أصدقائك</div>
   </div>
 
@@ -395,9 +395,9 @@
     <div class="card">
       <div class="muted center-txt" style="margin-bottom:14px;">مرحباً <b id="menu-username" style="color:var(--ink);"></b>، اختر طريقة اللعب</div>
 
-      <div class="menu-option" onclick="showScreen('screen-create-room')">
+      <div class="menu-option" onclick="openCreateRoomScreen()">
         <div class="icon" id="icon-key"></div>
-        <div class="txt"><strong>غرفة خاصة</strong><span>أنشئ غرفة وشارك الرمز مع أصدقائك</span></div>
+        <div class="txt"><strong>إنشاء غرفة</strong><span>أنشئ غرفة وشارك الرمز مع أصدقائك</span></div>
       </div>
       <div class="menu-option" onclick="showScreen('screen-join-room')">
         <div class="icon" id="icon-door"></div>
@@ -421,9 +421,11 @@
     </div>
     <div class="card">
       <h2 style="margin-top:0; font-size:1.2rem; font-family:'Tajawal', sans-serif; font-weight:700;">إنشاء غرفة جديدة</h2>
-      <div class="muted" style="margin-bottom:14px;">الفئات: إنسان · حيوان · نبات · جماد · بلاد</div>
       <label>أقصى عدد لاعبين (٢-١٠)</label>
       <input type="text" id="create-max-players" value="10" inputmode="numeric">
+      <div class="divider">تخصيص أسماء الفئات (اختياري)</div>
+      <div class="muted" style="margin-bottom:10px;">تقدرين تغيّرين اسم أي فئة، مثلاً "إنسان" إلى "أكلات" أو "مطاعم"</div>
+      <div id="create-category-inputs"></div>
       <button class="btn-primary" onclick="createRoom()">إنشاء الغرفة</button>
       <div id="create-error" class="muted" style="color:var(--seal); margin-top:8px;"></div>
     </div>
@@ -455,10 +457,18 @@
       </div>
       <h3 style="margin:0 0 6px;">اللاعبون في الغرفة</h3>
       <div id="lobby-players"></div>
-      <div class="divider">الفئات: إنسان · حيوان · نبات · جماد · بلاد</div>
+      <div class="divider" id="lobby-categories">الفئات: إنسان · حيوان · نبات · جماد · بلاد/ مدينة</div>
       <button class="btn-secondary" id="btn-ready" onclick="toggleReady()">أنا جاهز</button>
       <div style="margin-top:16px;" id="lobby-host-controls">
         <button class="btn-seal" id="btn-start-round" onclick="hostStartRound()">ابدأ اللعبة</button>
+        <button class="btn-secondary" style="margin-top:10px;" onclick="openCategoryEditor()">✏️ تعديل أسماء الفئات</button>
+        <div id="lobby-category-editor" class="hidden" style="margin-top:12px;">
+          <div id="lobby-category-inputs"></div>
+          <div class="btn-row">
+            <button class="btn-olive" style="flex:1;" onclick="saveCategoryEditor()">حفظ الأسماء</button>
+            <button class="btn-secondary" style="flex:1;" onclick="closeCategoryEditor()">إلغاء</button>
+          </div>
+        </div>
       </div>
       <div id="lobby-waiting-msg" class="muted center-txt hidden" style="margin-top:10px;">بانتظار المضيف لبدء اللعبة...</div>
       <button class="btn-secondary" style="margin-top:12px;" onclick="leaveRoom()">مغادرة الغرفة</button>
@@ -474,7 +484,6 @@
     <div class="card center-txt">
       <div class="letter-seal" id="play-letter">أ</div>
       <div class="muted" id="play-round-label">الجولة 1 من 5</div>
-      <div class="timer-display" id="play-timer"><span id="icon-clock"></span><span class="timer-num" id="timer-seconds">00</span> ثانية</div>
     </div>
     <div class="card">
       <table class="round-table" id="play-table">
@@ -554,7 +563,7 @@ const ALL_CATEGORIES = [
   {id:'animal', label:'حيوان', icon:'animal'},
   {id:'plant', label:'نبات', icon:'plant'},
   {id:'object', label:'جماد', icon:'object'},
-  {id:'country', label:'بلاد', icon:'country'},
+  {id:'country', label:'بلاد/ مدينة', icon:'country'},
 ];
 // Maps our category ids to the fixed column names in the Supabase "answers" table
 const CATEGORY_DB_FIELD = { human:'person', animal:'animal', plant:'plant', object:'object', country:'country' };
@@ -609,6 +618,32 @@ const AI_DICT = {
   }
 };
 
+/* ===================== SMART ANSWER CHECK (lightweight "AI") ===================== */
+// Builds a reverse lookup: normalized word -> set of category ids it's known to belong to,
+// using the same word lists the offline AI opponent already uses. This lets us catch the
+// case where a player writes a word from a *different* category (e.g. an animal name typed
+// under "بلاد/ مدينة") and score it as 0 even though it starts with the right letter.
+const CATEGORY_WORD_INDEX = {};
+Object.keys(AI_DICT).forEach(catId=>{
+  Object.values(AI_DICT[catId]).forEach(list=>{
+    (list||[]).forEach(word=>{
+      const n = norm(word);
+      if(!n) return;
+      if(!CATEGORY_WORD_INDEX[n]) CATEGORY_WORD_INDEX[n] = new Set();
+      CATEGORY_WORD_INDEX[n].add(catId);
+    });
+  });
+});
+// Returns true only if the answer starts with the round letter AND isn't a known word
+// belonging to some other category (so an animal name under "بلاد/ مدينة" won't score).
+function isValidCategoryAnswer(answer, catId, letter){
+  if(!startsWithLetter(answer, letter)) return false;
+  const n = norm(answer);
+  const knownCats = CATEGORY_WORD_INDEX[n];
+  if(knownCats && knownCats.size > 0 && !knownCats.has(catId)) return false;
+  return true;
+}
+
 /* ===================== STATE ===================== */
 let myName = '';
 let currentRoomId = null;      // Supabase rooms.id
@@ -626,6 +661,18 @@ let roundTimerInterval = null;
 let roundSeconds = 0;
 let isHost = false;
 let stopHandled = false;    // becomes true once this client has reacted to rooms.stop_requested for the current round
+let categoryLabels = {};    // { [categoryId]: customLabel } — overrides for the current room only
+function getCatLabel(catId){
+  const cat = ALL_CATEGORIES.find(c=>c.id===catId);
+  return (categoryLabels && categoryLabels[catId]) ? categoryLabels[catId] : (cat ? cat.label : catId);
+}
+function categoriesSummaryText(){
+  return 'الفئات: ' + ALL_CATEGORIES.map(c=>getCatLabel(c.id)).join(' · ');
+}
+function renderCategoriesSummary(){
+  const el = document.getElementById('lobby-categories');
+  if(el) el.textContent = categoriesSummaryText();
+}
 
 /* ===================== UTIL ===================== */
 function roomCode(){ return String(Math.floor(1000 + Math.random()*9000)); }
@@ -696,19 +743,89 @@ async function ensureUniqueRoomCode(){
   throw new Error('تعذر توليد رمز غرفة فريد، حاول مرة أخرى');
 }
 
+/* ===================== CATEGORY NAME EDITING ===================== */
+function categoryInputsHtml(idPrefix, labelsSource){
+  return ALL_CATEGORIES.map(c=>{
+    const val = (labelsSource && labelsSource[c.id]) ? labelsSource[c.id] : c.label;
+    return `<label>${ICONS[c.icon]} فئة "${c.label}"</label>
+      <input type="text" id="${idPrefix}-${c.id}" value="${val}" maxlength="20">`;
+  }).join('');
+}
+function readCategoryInputs(idPrefix){
+  const labels = {};
+  ALL_CATEGORIES.forEach(c=>{
+    const el = document.getElementById(idPrefix+'-'+c.id);
+    const v = el ? el.value.trim() : '';
+    labels[c.id] = v || c.label;
+  });
+  return labels;
+}
+function openCreateRoomScreen(){
+  document.getElementById('create-category-inputs').innerHTML = categoryInputsHtml('create-cat', null);
+  showScreen('screen-create-room');
+}
+function openCategoryEditor(){
+  document.getElementById('lobby-category-inputs').innerHTML = categoryInputsHtml('lobby-cat', categoryLabels);
+  document.getElementById('lobby-category-editor').classList.remove('hidden');
+}
+function closeCategoryEditor(){
+  document.getElementById('lobby-category-editor').classList.add('hidden');
+}
+async function saveCategoryEditor(){
+  const labels = readCategoryInputs('lobby-cat');
+  const roomId = currentRoomId || parseInt(localStorage.getItem('wg_room_id'));
+  if(!roomId) return;
+  try{
+    const { error } = await supabaseClient
+      .from('rooms')
+      .update({ category_labels: JSON.stringify(labels) })
+      .eq('id', roomId);
+    if(error) throw error;
+    categoryLabels = labels;
+    renderCategoriesSummary();
+    closeCategoryEditor();
+  }catch(e){
+    console.error('saveCategoryEditor error:', e);
+    alert('تعذر حفظ أسماء الفئات: ' + (e?.message || e?.hint || e?.code || 'تأكدي من وجود عمود category_labels في جدول rooms.'));
+  }
+}
+function applyCategoryLabelsFromRoom(room){
+  categoryLabels = {};
+  if(room && room.category_labels){
+    try{ categoryLabels = JSON.parse(room.category_labels) || {}; }catch(e){ categoryLabels = {}; }
+  }
+  renderCategoriesSummary();
+}
+
 async function createRoom(){
   const errEl = document.getElementById('create-error');
   errEl.textContent = '';
   if(!myName){ errEl.textContent = 'أدخل اسمك أولاً.'; showScreen('screen-name'); return; }
   let maxPlayers = parseInt(document.getElementById('create-max-players').value) || 10;
   maxPlayers = Math.max(2, Math.min(10, maxPlayers));
+  const customLabels = readCategoryInputs('create-cat');
+  const hasCustomLabels = ALL_CATEGORIES.some(c=>customLabels[c.id] !== c.label);
   try{
     const code = await ensureUniqueRoomCode();
-    const { data: roomData, error: roomErr } = await supabaseClient
+    const roomInsert = { room_code: code, status: 'waiting', current_letter: null, max_players: maxPlayers };
+    if(hasCustomLabels) roomInsert.category_labels = JSON.stringify(customLabels);
+    let { data: roomData, error: roomErr } = await supabaseClient
       .from('rooms')
-      .insert({ room_code: code, status: 'waiting', current_letter: null, max_players: maxPlayers })
+      .insert(roomInsert)
       .select()
       .single();
+    if(roomErr && hasCustomLabels){
+      // The category_labels column might not exist yet in this Supabase project —
+      // fall back to creating the room without custom names rather than blocking creation.
+      console.error('createRoom: insert with category_labels failed, retrying without it:', roomErr);
+      const retry = await supabaseClient
+        .from('rooms')
+        .insert({ room_code: code, status: 'waiting', current_letter: null, max_players: maxPlayers })
+        .select()
+        .single();
+      roomData = retry.data;
+      roomErr = retry.error;
+    }
     if(roomErr) throw roomErr;
     const { data: playerData, error: playerErr } = await supabaseClient
       .from('players')
@@ -719,6 +836,7 @@ async function createRoom(){
     setSession(roomData.id, playerData.id, code);
     currentRoomMode = 'private';
     currentRoomRow = roomData;
+    applyCategoryLabelsFromRoom(roomData);
     await enterLobby();
   }catch(e){
     console.error('createRoom error:', e);
@@ -750,6 +868,7 @@ async function joinRoomByCode(){
     setSession(room.id, playerData.id, code);
     currentRoomMode = 'private';
     currentRoomRow = room;
+    applyCategoryLabelsFromRoom(room);
     await enterLobby();
   }catch(e){
     console.error('joinRoomByCode error:', e);
@@ -780,6 +899,7 @@ async function quickMatch(){
         setSession(room.id, playerData.id, room.room_code);
         currentRoomMode = 'quick';
         currentRoomRow = room;
+        applyCategoryLabelsFromRoom(room);
         await enterLobby();
         return;
       }
@@ -801,6 +921,7 @@ async function quickMatch(){
     setSession(roomData.id, playerData.id, code);
     currentRoomMode = 'quick';
     currentRoomRow = roomData;
+    applyCategoryLabelsFromRoom(roomData);
     await enterLobby();
   }catch(e){
     console.error(e);
@@ -860,8 +981,8 @@ function finishAIRound(){
   aiState.categories.forEach(cid=>{
     let mine = myAnswers[cid] || '';
     let ai = aiAnswers[cid] || '';
-    let mineValid = startsWithLetter(mine, aiState.letter);
-    let aiValid = startsWithLetter(ai, aiState.letter);
+    let mineValid = isValidCategoryAnswer(mine, cid, aiState.letter);
+    let aiValid = isValidCategoryAnswer(ai, cid, aiState.letter);
     let minePts = 0, aiPts = 0;
     if(mineValid && aiValid){
       minePts = (norm(mine)===norm(ai)) ? 5 : 10;
@@ -995,6 +1116,7 @@ document.addEventListener('visibilitychange', ()=>{
 function onRoomUpdate(newRow){
   console.log('[room update]', { status: newRow.status, current_letter: newRow.current_letter, stop_requested: newRow.stop_requested, lastEnteredRound });
   currentRoomRow = newRow;
+  applyCategoryLabelsFromRoom(newRow);
   const parsed = parseLetterRound(newRow.current_letter);
   if(newRow.status === 'playing'){
     if(parsed.round !== lastEnteredRound){
@@ -1152,11 +1274,15 @@ function renderLobbyPlayers(){
 function renderLobbyControls(){
   document.getElementById('lobby-host-controls').classList.toggle('hidden', !isHost);
   document.getElementById('lobby-waiting-msg').classList.toggle('hidden', isHost);
+  renderCategoriesSummary();
+  // The host only needs "ابدأ اللعبة" and "مغادرة الغرفة" — the ready toggle is
+  // for the other players waiting on the host, so it's hidden for the host.
+  const readyBtn = document.getElementById('btn-ready');
+  if(readyBtn) readyBtn.classList.toggle('hidden', isHost);
   // Note: the start button is intentionally NEVER disabled here. A disabled
   // button produces zero feedback when clicked (no error, no message) — it
   // just silently does nothing, which is confusing. hostStartRound() itself
   // checks the player count and shows a clear message if it's not met yet.
-  const readyBtn = document.getElementById('btn-ready');
   const me = currentPlayers.find(p=>p.id === currentPlayerId);
   if(me && readyBtn){
     readyBtn.textContent = me.is_ready ? 'إلغاء الجاهزية' : 'أنا جاهز';
@@ -1269,7 +1395,7 @@ function renderPlayScreen(cfg){
   table.innerHTML = cfg.categories.map(cid=>{
     const cat = ALL_CATEGORIES.find(c=>c.id===cid);
     return `<tr>
-      <td class="cat-label" style="width:35%;">${ICONS[cat.icon]} ${cat.label}</td>
+      <td class="cat-label" style="width:35%;">${ICONS[cat.icon]} ${getCatLabel(cid)}</td>
       <td><input type="text" id="input-${cid}" placeholder="..." autocomplete="off"></td>
     </tr>`;
   }).join('');
@@ -1286,17 +1412,8 @@ function renderPlayScreen(cfg){
   setTimeout(()=>{ const first = table.querySelector('input'); if(first) first.focus(); }, 100);
 }
 function startRoundTimer(){
-  stopRoundTimer();
-  roundSeconds = 0;
-  const numEl = document.getElementById('timer-seconds');
-  const wrapEl = document.getElementById('play-timer');
-  numEl.textContent = '00';
-  wrapEl.classList.remove('urgent');
-  roundTimerInterval = setInterval(()=>{
-    roundSeconds += 1;
-    numEl.textContent = String(roundSeconds).padStart(2,'0');
-    if(roundSeconds >= 60) wrapEl.classList.add('urgent');
-  }, 1000);
+  // Seconds counter removed from the play screen per request — kept as a
+  // no-op so existing calls elsewhere in the app don't need to change.
 }
 function stopRoundTimer(){
   if(roundTimerInterval){ clearInterval(roundTimerInterval); roundTimerInterval = null; }
@@ -1390,16 +1507,17 @@ async function hostFinalizeRound(){
     const byPlayer = {};
     answers.forEach(a=>{ byPlayer[a.player_id] = a; });
 
-    // Simple scoring rule (kept from the original design; easy to swap out later):
-    // 10 points for a valid answer starting with the letter, 5 points if the same
-    // (normalized) word was written by more than one player, 0 for invalid/empty.
+    // Scoring rule: 10 points for a valid answer starting with the letter (and not a
+    // known word from a different category — e.g. an animal name typed under "بلاد/ مدينة"
+    // scores 0), 5 points if the same (normalized) word was written by more than one
+    // player, 0 for invalid/empty.
     const counts = {};
     ALL_CATEGORIES.forEach(c=>{ counts[c.id] = {}; });
     ALL_CATEGORIES.forEach(c=>{
       const field = CATEGORY_DB_FIELD[c.id];
       playerIds.forEach(pid=>{
         const ans = (byPlayer[pid] && byPlayer[pid][field]) || '';
-        if(startsWithLetter(ans, currentLetter)){
+        if(isValidCategoryAnswer(ans, c.id, currentLetter)){
           const n = norm(ans);
           counts[c.id][n] = (counts[c.id][n]||0) + 1;
         }
@@ -1410,7 +1528,7 @@ async function hostFinalizeRound(){
       ALL_CATEGORIES.forEach(c=>{
         const field = CATEGORY_DB_FIELD[c.id];
         const ans = (byPlayer[p.id] && byPlayer[p.id][field]) || '';
-        if(startsWithLetter(ans, currentLetter)){
+        if(isValidCategoryAnswer(ans, c.id, currentLetter)){
           const n = norm(ans);
           gain += counts[c.id][n] > 1 ? 5 : 10;
         }
@@ -1453,7 +1571,7 @@ function renderOnlineReview(byPlayer){
     const field = CATEGORY_DB_FIELD[c.id];
     playerIds.forEach(pid=>{
       const ans = (byPlayer[pid] && byPlayer[pid][field]) || '';
-      if(startsWithLetter(ans, currentLetter)){
+      if(isValidCategoryAnswer(ans, c.id, currentLetter)){
         const n = norm(ans);
         counts[c.id][n] = (counts[c.id][n]||0) + 1;
       }
@@ -1462,11 +1580,11 @@ function renderOnlineReview(byPlayer){
   let html = '';
   ALL_CATEGORIES.forEach(c=>{
     const field = CATEGORY_DB_FIELD[c.id];
-    html += `<div class="review-cat"><h3>${ICONS[c.icon]} ${c.label}</h3>`;
+    html += `<div class="review-cat"><h3>${ICONS[c.icon]} ${getCatLabel(c.id)}</h3>`;
     currentPlayers.forEach(p=>{
       const ans = (byPlayer[p.id] && byPlayer[p.id][field]) || '';
       let pts = 0;
-      if(startsWithLetter(ans, currentLetter)){
+      if(isValidCategoryAnswer(ans, c.id, currentLetter)){
         const n = norm(ans);
         pts = counts[c.id][n] > 1 ? 5 : 10;
       }
@@ -1648,6 +1766,7 @@ async function initApp(){
         currentRoomCode = room.room_code;
         currentRoomRow = room;
         currentRoomMode = 'private';
+        applyCategoryLabelsFromRoom(room);
         isHost = !!player.is_host;
         document.getElementById('menu-username').textContent = myName;
         subscribeRoomChannel(currentRoomId);
